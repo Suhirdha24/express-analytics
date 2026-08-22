@@ -1,5 +1,7 @@
 # 🧠 DocuMind: A Self-Correcting Technical Documentation Assistant
 
+[![Streamlit App](https://static.streamlit.io/badges/streamlit_badge_black_white.svg)](https://express-analytics-hfsuhuvs8vwlutwm8rczjs.streamlit.app/)
+
 > 🌐 **Live Web Application Demo**: [https://express-analytics-hfsuhuvs8vwlutwm8rczjs.streamlit.app/](https://express-analytics-hfsuhuvs8vwlutwm8rczjs.streamlit.app/)  
 > 📂 **GitHub Repository**: [https://github.com/Suhirdha24/express-analytics](https://github.com/Suhirdha24/express-analytics)
 
