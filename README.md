@@ -1,5 +1,8 @@
 # 🧠 DocuMind: A Self-Correcting Technical Documentation Assistant
 
+> 🌐 **Live Web Application Demo**: [https://express-analytics-hfsuhuvs8vwlutwm8rczjs.streamlit.app/](https://express-analytics-hfsuhuvs8vwlutwm8rczjs.streamlit.app/)  
+> 📂 **GitHub Repository**: [https://github.com/Suhirdha24/express-analytics](https://github.com/Suhirdha24/express-analytics)
+
 DocuMind is an enterprise-ready, production-grade Retrieval-Augmented Generation (RAG) system built with **LangGraph**, **LangChain**, **FastAPI**, **ChromaDB**, **Rank-BM25**, and **Google Gemini** (or configurable LLM providers).
 
 Unlike standard RAG pipelines (Question → Retrieve → Answer) which silently fail when retrieval quality is low or hallucinate unsupported answers, DocuMind implements a **self-correcting agentic workflow** that evaluates document relevance, rewrites low-recall queries, validates groundedness, calculates an explicit confidence score, and provides graceful fallback responses when evidence is insufficient.
