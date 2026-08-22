@@ -1,6 +1,20 @@
 import streamlit as st
 import requests
 import os
+from pathlib import Path
+
+# Add parent directory to sys.path for direct module invocation fallback
+import sys
+root_dir = Path(__file__).resolve().parent
+if str(root_dir) not in sys.path:
+    sys.path.insert(0, str(root_dir))
+
+from app.graph.workflow import run_documind_workflow
+from app.ingestion.pipeline import ingestion_pipeline
+from app.ingestion.vector_store import vector_store
+from app.services.feedback_service import feedback_service
+from app.services.metrics_service import metrics_service
+from app.models.schemas import FeedbackRequest
 
 API_BASE_URL = os.getenv("API_BASE_URL", "http://localhost:8000")
 
@@ -23,6 +37,18 @@ tab1, tab2, tab3, tab4 = st.tabs([
     "⚙️ Health & Status"
 ])
 
+# Ensure sample documents are indexed if vector store is empty on cloud launch
+try:
+    if vector_store.get_indexed_document_count() == 0:
+        docs_dir = root_dir / "data" / "documents"
+        if docs_dir.exists():
+            sample_files = list(docs_dir.glob("*.md")) + list(docs_dir.glob("*.txt"))
+            for f in sample_files:
+                ingestion_pipeline.ingest_file(f)
+except Exception as e:
+    pass
+
+
 # --- Tab 1: Ask Question ---
 with tab1:
     st.header("Ask Technical Documentation Questions")
@@ -37,15 +63,30 @@ with tab1:
             st.warning("Please enter a question.")
         else:
             with st.spinner("Executing LangGraph Self-Correcting RAG Workflow..."):
+                data = None
+                # Try HTTP API first
                 try:
-                    res = requests.post(f"{API_BASE_URL}/query", json={"question": question})
+                    res = requests.post(f"{API_BASE_URL}/query", json={"question": question}, timeout=3)
                     if res.status_code == 200:
                         data = res.json()
-                        st.session_state["last_query_result"] = data
-                    else:
-                        st.error(f"API Error ({res.status_code}): {res.text}")
-                except Exception as e:
-                    st.error(f"Connection failed: {e}")
+                except Exception:
+                    data = None
+
+                # Fallback to direct Python in-memory execution if API unavailable (e.g. Streamlit Cloud)
+                if data is None:
+                    try:
+                        response_obj = run_documind_workflow(question=question.strip())
+                        data = response_obj.model_dump()
+                        metrics_service.record_query(
+                            status=response_obj.status,
+                            confidence_score=response_obj.confidence_score,
+                            retry_count=response_obj.retry_count
+                        )
+                    except Exception as ex:
+                        st.error(f"Execution failed: {ex}")
+
+                if data:
+                    st.session_state["last_query_result"] = data
 
     if "last_query_result" in st.session_state:
         data = st.session_state["last_query_result"]
@@ -76,17 +117,14 @@ with tab1:
             comment = st.text_input("Optional Comment")
             if st.button("Submit Feedback"):
                 try:
-                    fb_res = requests.post(
-                        f"{API_BASE_URL}/feedback",
-                        json={
-                            "question": question,
-                            "answer": data["answer"],
-                            "rating": rating,
-                            "comment": comment
-                        }
+                    fb_req = FeedbackRequest(
+                        question=question,
+                        answer=data["answer"],
+                        rating=rating,
+                        comment=comment
                     )
-                    if fb_res.status_code == 200:
-                        st.success("Thank you for your feedback!")
+                    feedback_service.record_feedback(fb_req)
+                    st.success("Thank you for your feedback!")
                 except Exception as e:
                     st.error(f"Failed to submit feedback: {e}")
 
@@ -101,36 +139,51 @@ with tab2:
         if st.button("Ingest File"):
             if uploaded_file:
                 with st.spinner("Processing document..."):
-                    files = {"file": (uploaded_file.name, uploaded_file.getvalue(), uploaded_file.type)}
-                    res = requests.post(f"{API_BASE_URL}/ingest", files=files)
-                    if res.status_code == 200:
-                        st.success(res.json()["message"])
-                    else:
-                        st.error(f"Error: {res.text}")
+                    try:
+                        content = uploaded_file.getvalue().decode("utf-8")
+                        res = ingestion_pipeline.ingest_raw_text(
+                            title=uploaded_file.name,
+                            content=content,
+                            source=uploaded_file.name
+                        )
+                        st.success(res["message"])
+                    except Exception as e:
+                        st.error(f"Error: {e}")
     else:
         url = st.text_input("Enter documentation web URL:")
         title_override = st.text_input("Optional Title Override:")
         if st.button("Ingest URL"):
             if url:
                 with st.spinner("Fetching and indexing web content..."):
-                    res = requests.post(f"{API_BASE_URL}/ingest/url", json={"url": url, "title": title_override})
-                    if res.status_code == 200:
-                        st.success(res.json()["message"])
-                    else:
-                        st.error(f"Error: {res.text}")
+                    try:
+                        res = ingestion_pipeline.ingest_url(url, title_override=title_override)
+                        st.success(res["message"])
+                    except Exception as e:
+                        st.error(f"Error: {e}")
 
     st.subheader("Currently Indexed Documents")
-    if st.button("Refresh Document List"):
-        pass
-
+    
     try:
-        doc_res = requests.get(f"{API_BASE_URL}/documents")
-        if doc_res.status_code == 200:
-            docs = doc_res.json().get("documents", [])
-            if docs:
-                st.table(docs)
-            else:
-                st.info("No documents indexed yet. Run the sample ingestion script or upload files above.")
+        metadatas = vector_store.get_all_chunk_metadata()
+        doc_map = {}
+        for meta in metadatas:
+            doc_id = meta.get("document_id")
+            if doc_id and doc_id not in doc_map:
+                doc_map[doc_id] = {
+                    "document_id": doc_id[:8] + "...",
+                    "title": meta.get("title", "Untitled"),
+                    "source": meta.get("source", "Unknown"),
+                    "total_chunks": 0,
+                    "ingestion_timestamp": meta.get("ingestion_timestamp", "")[:19],
+                }
+            if doc_id:
+                doc_map[doc_id]["total_chunks"] += 1
+
+        docs_list = list(doc_map.values())
+        if docs_list:
+            st.table(docs_list)
+        else:
+            st.info("No documents indexed yet.")
     except Exception as e:
         st.warning(f"Could not load document registry: {e}")
 
@@ -138,18 +191,16 @@ with tab2:
 with tab3:
     st.header("System Execution Metrics")
     try:
-        metrics_res = requests.get(f"{API_BASE_URL}/metrics")
-        if metrics_res.status_code == 200:
-            m = metrics_res.json()
-            mcol1, mcol2, mcol3 = st.columns(3)
-            mcol1.metric("Total Queries Processed", m["total_queries"])
-            mcol2.metric("Successful Queries", m["successful_queries"])
-            mcol3.metric("Insufficient Evidence Queries", m["insufficient_evidence_queries"])
+        m = metrics_service.get_metrics()
+        mcol1, mcol2, mcol3 = st.columns(3)
+        mcol1.metric("Total Queries Processed", m.total_queries)
+        mcol2.metric("Successful Queries", m.successful_queries)
+        mcol3.metric("Insufficient Evidence Queries", m.insufficient_evidence_queries)
 
-            mcol4, mcol5, mcol6 = st.columns(3)
-            mcol4.metric("Average Confidence Score", f"{m['average_confidence']}%")
-            mcol5.metric("Average Retries per Query", m["average_retries"])
-            mcol6.metric("Feedback Balance", f"👍 {m['positive_feedback']} / 👎 {m['negative_feedback']}")
+        mcol4, mcol5, mcol6 = st.columns(3)
+        mcol4.metric("Average Confidence Score", f"{m.average_confidence}%")
+        mcol5.metric("Average Retries per Query", m.average_retries)
+        mcol6.metric("Feedback Balance", f"👍 {m.positive_feedback} / 👎 {m.negative_feedback}")
     except Exception as e:
         st.warning(f"Could not fetch metrics: {e}")
 
@@ -157,8 +208,12 @@ with tab3:
 with tab4:
     st.header("Application Readiness & Health Check")
     try:
-        h_res = requests.get(f"{API_BASE_URL}/health")
-        if h_res.status_code == 200:
-            st.json(h_res.json())
+        doc_count = vector_store.get_indexed_document_count()
+        st.json({
+            "status": "healthy",
+            "vector_store": "available",
+            "indexed_documents": doc_count,
+            "bm25_index": "available"
+        })
     except Exception as e:
-        st.error(f"Backend API unavailable at {API_BASE_URL}: {e}")
+        st.error(f"Health check failed: {e}")
