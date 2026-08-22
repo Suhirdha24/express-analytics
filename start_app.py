@@ -37,7 +37,11 @@ def start_services():
     # 3. Launch Streamlit Frontend Service
     print("\n[3/3] Starting Streamlit Interactive Dashboard on http://localhost:8501 ...")
     ui_process = subprocess.Popen(
-        [PYTHON_EXE, "-m", "streamlit", "run", "streamlit_app.py", "--server.port=8501", "--server.address=0.0.0.0"],
+        [
+            PYTHON_EXE, "-m", "streamlit", "run", "streamlit_app.py",
+            "--server.port=8501", "--server.address=0.0.0.0",
+            "--server.headless=true", "--browser.gatherUsageStats=false"
+        ],
         cwd=root_dir
     )
 
