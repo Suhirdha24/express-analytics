@@ -1,0 +1,27 @@
+FROM python:3.11-slim
+
+WORKDIR /app
+
+# Install system build dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    curl \
+    git \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy requirements and install dependencies
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Copy application code and sample documents
+COPY app/ app/
+COPY scripts/ scripts/
+COPY data/ data/
+
+EXPOSE 8000
+
+ENV HOST=0.0.0.0
+ENV PORT=8000
+
+# Run document seeding on container start if database empty, then launch FastAPI
+CMD ["sh", "-c", "python scripts/ingest_sample_docs.py && uvicorn app.main:app --host 0.0.0.0 --port 8000"]

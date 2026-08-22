@@ -1,0 +1,28 @@
+# Python virtual environment
+venv/
+env/
+ENV/
+.venv
+
+# Python Bytecode & Cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.pytest_cache/
+
+# Environment variables & secrets
+.env
+.env.local
+
+# Database & Generated Files
+data/chroma_db/
+data/metadata/*.pkl
+data/feedback/*.db
+*.log
+
+# IDE & OS Files
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
