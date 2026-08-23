@@ -29,8 +29,6 @@ Standard naive RAG architectures suffer from three critical flaws:
 2. **Irrelevant Noise**: Unfiltered retrieved chunks dilute context windows, introducing noise into the LLM prompt.
 3. **Hallucination Risk**: LLMs often generate plausible-sounding answers even when retrieved context lacks supporting evidence.
 
-DocuMind solves these problems by inserting evaluation, self-correction, and validation control loops into the RAG lifecycle.
-
 ---
 
 ## 3. Why This Architecture Was Chosen
